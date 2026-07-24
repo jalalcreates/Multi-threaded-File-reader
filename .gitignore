@@ -1,0 +1,2 @@
+New-Item .gitignore
+Add-Content .gitignore "*.exe"
