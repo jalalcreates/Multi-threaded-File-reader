@@ -166,8 +166,9 @@ public:
     }
 };
 atomic<int> debug_hits{0};
-Result process(const Chunk& c, Metrics& m) {
+Result process(const Chunk& c, Metrics& m,int core_id) {
     debug_hits.fetch_add(1, memory_order_relaxed);
+    raw_s.hits[core_id % 4].fetch_add(1, memory_order_relaxed);
     uint64_t h = 14695981039346656037ULL;
     for (char ch : c.data) {
         h ^= (uint64_t)ch;
@@ -189,7 +190,10 @@ void transfer(Bucket& src, Bucket& dst, Result& r) {
     scoped_lock lk(src.mtx, dst.mtx);
     dst.items.push_back(r);
 }
-
+struct RawStats {
+    atomic<int> hits[4];
+};
+RawStats raw_s;
 int main() {
     cout << "starting hydra engine...\n";
     const size_t cores = 4;
@@ -229,7 +233,7 @@ int main() {
         for(auto& c : batch) {
             size_t core = assign % cores;
             assign++;
-            futs.push_back(pool.submit([c, &metrics, core]{ return process(c, metrics[core]); }));
+            futs.push_back(pool.submit([c, &metrics, core]{ return process(c, metrics[core],core); }));
             total--;
         }
     }
