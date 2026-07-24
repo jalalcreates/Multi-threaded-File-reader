@@ -165,9 +165,9 @@ public:
         }
     }
 };
-int debug_hits = 0;
+atomic<int> debug_hits{0};
 Result process(const Chunk& c, Metrics& m) {
-    debug_hits++;
+    debug_hits.fetch_add(1, memory_order_relaxed);
     uint64_t h = 14695981039346656037ULL;
     for (char ch : c.data) {
         h ^= (uint64_t)ch;
