@@ -10,6 +10,8 @@
 #include <chrono>
 #include <functional>
 #include <numeric>
+#include <sstream>
+#include <iomanip>
 
 using namespace std;
 
@@ -142,8 +144,94 @@ public:
         }
     }
 };
+int debug_hits = 0;
+Result process(const Chunk& c, Metrics& m) {
+    debug_hits++;
+    uint64_t h = 14695981039346656037ULL;
+    for (char ch : c.data) {
+        h ^= (uint64_t)ch;
+        h *= 1099511628211ULL;
+    }
+    this_thread::sleep_for(chrono::milliseconds(30));
+    m.bytes.fetch_add(c.data.size(), memory_order_relaxed);
+    m.done.fetch_add(1, memory_order_relaxed);
+    
+    string sum;
+    if (c.type == CType::LOG) sum = "log audit done";
+    else if (c.type == CType::IMG) sum = "img filter done";
+    else sum = "csv analytics done";
+    
+    return {c.id, c.type, c.data.size(), h, sum};
+}
+
+void transfer(Bucket& src, Bucket& dst, Result& r) {
+    scoped_lock lk(src.mtx, dst.mtx);
+    dst.items.push_back(r);
+}
 
 int main() {
     cout << "starting hydra engine...\n";
+    const size_t cores = 4;
+    Pool pool(cores);
+    RingBuf<Chunk, 16> rb;
+    vector<Metrics> metrics(cores);
+    Bucket staging{"staging", {}, {}}, archive{"archive", {}, {}};
+    
+    auto prod = async(launch::async, [&]{
+        vector<Chunk> in = {
+            {101, CType::LOG, "2026-07-22 10:00:00 ERROR 500 Database Connection Failed"},
+            {102, CType::IMG, "\xFF\x00\xA5\xBB\xCC\xDD\xEE\xFF Pixel raw byte stream"},
+            {103, CType::CSV, "AAPL,100,180.50\nMSFT,50,420.10\nNVDA,200,120.00"},
+            {104, CType::LOG, "2026-07-22 10:00:05 WARN 404 Route Not Found"},
+            {105, CType::IMG, "\x11\x22\x33\x44\x55\x66\x77\x88 Second image slice"}
+        };
+        for (auto& c : in) {
+            while (!rb.push(c)) this_thread::yield();
+        }
+        return in.size();
+    });
+    
+    size_t total = prod.get();
+    cout << "ingested " << total << " chunks\n";
+    
+    vector<future<Result>> futs;
+    Chunk c;
+    size_t assign = 0;
+    while (total > 0) {
+        if (rb.pop(c)) {
+            size_t core = assign % cores;
+            assign++;
+            futs.push_back(pool.submit([c, &metrics, core]{ return process(c, metrics[core]); }));
+            total--;
+        }
+    }
+    
+    auto audit = async(launch::deferred, [&futs]{
+        cout << "computing deep audit...\n";
+        uint64_t sum = 0;
+        for (auto& f : futs) {
+            if (f.valid()) sum += f.get().hash;
+        }
+        ostringstream ss;
+        ss << "checksum: 0x" << hex << sum;
+        return ss.str();
+    });
+    
+    cout << "harvesting results...\n";
+    for (size_t i = 0; i < futs.size(); ++i) {
+        Result r = futs[i].get();
+        cout << "chunk " << r.id << " hash: 0x" << hex << r.hash << dec << " | " << r.summary << "\n";
+        transfer(staging, archive, r);
+    }
+    
+    cout << "run audit? ";
+    string rep = audit.get();
+    cout << rep << "\n";
+    
+    cout << "metrics:\n";
+    for (size_t i = 0; i < cores; ++i) {
+        cout << "core " << i << " -> chunks: " << metrics[i].done.load() << " | bytes: " << metrics[i].bytes.load() << "\n";
+    }
+        cout << "debug hits: " << debug_hits << "\n";
     return 0;
 }
