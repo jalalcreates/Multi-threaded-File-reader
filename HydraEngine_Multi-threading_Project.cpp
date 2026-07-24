@@ -238,16 +238,19 @@ int main() {
         }
     }
     
-    auto audit = async(launch::deferred, [&futs]{
-        cout << "computing deep audit...\n";
-        uint64_t sum = 0;
-        for (auto& f : futs) {
-            if (f.valid()) sum += f.get().hash;
+    auto audit = async(launch::deferred, [&]{
+    cout << "computing deep audit...\n";
+    uint64_t sum = 0;
+    for (size_t i = 0; i < futs.size(); ++i) {
+        if (futs[i].valid()) {
+            sum += futs[i].get().hash;
+            futs[i] = future<Result>();
         }
-        ostringstream ss;
-        ss << "checksum: 0x" << hex << sum;
-        return ss.str();
-    });
+    }
+    ostringstream ss;
+    ss << "checksum: 0x" << hex << sum;
+    return ss.str();
+});
     
     cout << "harvesting results...\n";
     for (size_t i = 0; i < futs.size(); ++i) {
