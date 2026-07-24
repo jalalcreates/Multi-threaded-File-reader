@@ -72,8 +72,67 @@ public:
     }
 };
 
+class Pool {
+    struct Lane {
+        thread t;
+        queue<function<void()>> q;
+        mutex mtx;
+        condition_variable cv;
+        bool stop = false;
+    };
+    vector<Lane> lanes;
+    size_t sz;
+    atomic<size_t> next{0};
+    
+    void loop(size_t id) {
+        while (true) {
+            function<void()> task;
+            {
+                unique_lock<mutex> lk(lanes[id].mtx);
+                lanes[id].cv.wait(lk, [&]{ return !lanes[id].q.empty() || lanes[id].stop; });
+                if (lanes[id].stop && lanes[id].q.empty()) return;
+                if (!lanes[id].q.empty()) {
+                    task = move(lanes[id].q.front());
+                    lanes[id].q.pop();
+                }
+            }
+            if (task) task();
+        }
+    }
+public:
+    Pool(size_t n) : sz(n), lanes(n) {
+        for (size_t i = 0; i < sz; ++i) {
+            lanes[i].t = thread(&Pool::loop, this, i);
+        }
+    }
+    
+    template <typename F, typename... A>
+    auto submit(F&& f, A&&... a) -> future<typename invoke_result<F, A...>::type> {
+        using R = typename invoke_result<F, A...>::type;
+        auto t = make_shared<packaged_task<R()>>(bind(forward<F>(f), forward<A>(a)...));
+        future<R> fut = t->get_future();
+        size_t idx = next.fetch_add(1, memory_order_relaxed) % sz;
+        {
+            lock_guard<mutex> lk(lanes[idx].mtx);
+            lanes[idx].q.push([t]{ (*t)(); });
+        }
+        lanes[idx].cv.notify_one();
+        return fut;
+    }
+    
+    ~Pool() {
+        for (size_t i = 0; i < sz; ++i) {
+            {
+                lock_guard<mutex> lk(lanes[i].mtx);
+                lanes[i].stop = true;
+            }
+            lanes[i].cv.notify_all();
+            lanes[i].t.join();
+        }
+    }
+};
+
 int main() {
     cout << "starting hydra engine...\n";
-    RingBuf<Chunk, 16> rb;
     return 0;
 }
