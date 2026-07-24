@@ -221,7 +221,7 @@ int main() {
     vector<future<Result>> futs;
     size_t assign = 0;
     vector<Chunk> batch;
-        while (total > 0) {
+    while (total > 0) {
         batch.clear();
         rb.pop_batch(batch, 3);
         
@@ -237,6 +237,8 @@ int main() {
             total--;
         }
     }
+    this_thread::sleep_for(chrono::milliseconds(100));
+    pool.cancel();
     
     auto audit = async(launch::deferred, [&]{
     cout << "computing deep audit...\n";
