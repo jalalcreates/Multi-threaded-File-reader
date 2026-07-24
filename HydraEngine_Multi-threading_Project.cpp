@@ -72,6 +72,13 @@ public:
         item = buf[cr];
         return true;
     }
+    size_t pop_batch(vector<T>& out, size_t max_items) {
+        size_t count = 0;
+        while(count < max_items && pop(out.emplace_back())) {
+            count++;
+        }
+        return count;
+    }
         size_t size() {
         return w_idx.load() - r_idx.load();
     }
@@ -197,10 +204,12 @@ int main() {
     cout << "buf size: " << rb.size() << "\n";
     cout << "ingested " << total << " chunks\n";
     vector<future<Result>> futs;
-    Chunk c;
     size_t assign = 0;
+    vector<Chunk> batch;
     while (total > 0) {
-        if (rb.pop(c)) {
+        batch.clear();
+        rb.pop_batch(batch, 3);
+        for(auto& c : batch) {
             size_t core = assign % cores;
             assign++;
             futs.push_back(pool.submit([c, &metrics, core]{ return process(c, metrics[core]); }));
