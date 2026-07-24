@@ -84,7 +84,7 @@ class Pool {
     size_t sz;
     atomic<size_t> next{0};
     
-    void loop(size_t id) {
+        void loop(size_t id) {
         while (true) {
             function<void()> task;
             {
@@ -94,6 +94,17 @@ class Pool {
                 if (!lanes[id].q.empty()) {
                     task = move(lanes[id].q.front());
                     lanes[id].q.pop();
+                }
+            }
+            if (!task) {
+                for (size_t off = 1; off < sz; ++off) {
+                    size_t nid = (id + off) % sz;
+                    unique_lock<mutex> slk(lanes[nid].mtx, try_to_lock);
+                    if (slk.owns_lock() && !lanes[nid].q.empty()) {
+                        task = move(lanes[nid].q.front());
+                        lanes[nid].q.pop();
+                        break;
+                    }
                 }
             }
             if (task) task();
