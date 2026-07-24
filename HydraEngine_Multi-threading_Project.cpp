@@ -73,12 +73,15 @@ public:
         return true;
     }
     size_t pop_batch(vector<T>& out, size_t max_items) {
-        size_t count = 0;
-        while(count < max_items && pop(out.emplace_back())) {
-            count++;
-        }
-        return count;
+    size_t count = 0;
+    while(count < max_items) {
+        T item;
+        if (!pop(item)) break;
+        out.push_back(move(item));
+        count++;
     }
+    return count;
+}
         size_t size() {
         return w_idx.load() - r_idx.load();
     }
@@ -95,9 +98,11 @@ class Pool {
     vector<Lane> lanes;
     size_t sz;
     atomic<size_t> next{0};
+    atomic<bool> cancelled{false};
     
         void loop(size_t id) {
         while (true) {
+            if (cancelled.load()) return;
             function<void()> task;
             {
                 unique_lock<mutex> lk(lanes[id].mtx);
@@ -141,6 +146,12 @@ public:
         }
         lanes[idx].cv.notify_one();
         return fut;
+    }
+    void cancel() {
+        cancelled.store(true);
+        for (size_t i = 0; i < sz; ++i) {
+            lanes[i].cv.notify_all();
+        }
     }
     
     ~Pool() {
@@ -206,9 +217,15 @@ int main() {
     vector<future<Result>> futs;
     size_t assign = 0;
     vector<Chunk> batch;
-    while (total > 0) {
+        while (total > 0) {
         batch.clear();
         rb.pop_batch(batch, 3);
+        
+        if (batch.empty()) {
+            this_thread::yield(); // Give the CPU a break so the OS doesn't freeze
+            continue;
+        }
+
         for(auto& c : batch) {
             size_t core = assign % cores;
             assign++;
