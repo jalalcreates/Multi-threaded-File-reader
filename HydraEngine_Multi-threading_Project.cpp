@@ -72,6 +72,9 @@ public:
         item = buf[cr];
         return true;
     }
+        size_t size() {
+        return w_idx.load() - r_idx.load();
+    }
 };
 
 class Pool {
@@ -190,10 +193,9 @@ int main() {
         }
         return in.size();
     });
-    
     size_t total = prod.get();
+    cout << "buf size: " << rb.size() << "\n";
     cout << "ingested " << total << " chunks\n";
-    
     vector<future<Result>> futs;
     Chunk c;
     size_t assign = 0;
