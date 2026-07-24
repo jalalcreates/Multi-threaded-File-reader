@@ -169,10 +169,17 @@ struct RawStats {
     atomic<int> hits[4];
 };
 RawStats raw_s;
+struct BatchStats {
+    atomic<int> count{0};
+    atomic<size_t> total_bytes{0};
+};
+BatchStats batch_stats;
 atomic<int> debug_hits{0};
 Result process(const Chunk& c, Metrics& m,int core_id) {
     debug_hits.fetch_add(1, memory_order_relaxed);
     raw_s.hits[core_id % 4].fetch_add(1, memory_order_relaxed);
+    batch_stats.count.fetch_add(1, memory_order_relaxed);
+    batch_stats.total_bytes.fetch_add(c.data.size(), memory_order_relaxed);
     uint64_t h = 14695981039346656037ULL;
     for (char ch : c.data) {
         h ^= (uint64_t)ch;
@@ -270,5 +277,6 @@ int main() {
         cout << "core " << i << " -> chunks: " << metrics[i].done.load() << " | bytes: " << metrics[i].bytes.load() << "\n";
     }
         cout << "debug hits: " << debug_hits << "\n";
+        cout << "batch stats: " << batch_stats.count.load() << " batches, " << batch_stats.total_bytes.load() << " bytes\n";
     return 0;
 }
