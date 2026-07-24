@@ -216,6 +216,7 @@ void transfer(Bucket& src, Bucket& dst, Result& r) {
 }
 int main() {
     cout << "starting hydra engine...\n";
+    auto start = chrono::steady_clock::now();
     const size_t cores = 4;
     Pool pool(cores);
     RingBuf<Chunk, 16> rb;
@@ -291,5 +292,7 @@ int main() {
     }
         cout << "debug hits: " << debug_hits << "\n";
         cout << "batch stats: " << batch_stats.count.load() << " batches, " << batch_stats.total_bytes.load() << " bytes\n";
+        auto end = chrono::steady_clock::now();
+        cout << "total time: " << chrono::duration_cast<chrono::milliseconds>(end - start).count() << "ms\n";
     return 0;
 }
