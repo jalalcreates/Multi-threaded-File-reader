@@ -40,7 +40,40 @@ struct Bucket {
     mutex mtx;
 };
 
+template <typename T, size_t Cap>
+class RingBuf {
+    T buf[Cap];
+    atomic<size_t> w_idx{0};
+    atomic<size_t> r_idx{0};
+public:
+    bool push(const T& item) {
+        size_t cw = w_idx.load(memory_order_relaxed);
+        size_t nw = (cw + 1) % Cap;
+        if (nw == r_idx.load(memory_order_acquire)) return false;
+        
+        while (!w_idx.compare_exchange_weak(cw, nw, memory_order_release, memory_order_relaxed)) {
+            nw = (cw + 1) % Cap;
+            if (nw == r_idx.load(memory_order_acquire)) return false;
+        }
+        buf[cw] = item;
+        return true;
+    }
+    
+    bool pop(T& item) {
+        size_t cr = r_idx.load(memory_order_relaxed);
+        if (cr == w_idx.load(memory_order_acquire)) return false;
+        size_t nr = (cr + 1) % Cap;
+        while (!r_idx.compare_exchange_weak(cr, nr, memory_order_release, memory_order_relaxed)) {
+            if (cr == w_idx.load(memory_order_acquire)) return false;
+            nr = (cr + 1) % Cap;
+        }
+        item = buf[cr];
+        return true;
+    }
+};
+
 int main() {
     cout << "starting hydra engine...\n";
+    RingBuf<Chunk, 16> rb;
     return 0;
 }
