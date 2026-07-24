@@ -99,6 +99,7 @@ class Pool {
     size_t sz;
     atomic<size_t> next{0};
     atomic<bool> cancelled{false};
+    atomic<int> pending{0};
     
         void loop(size_t id) {
         while (true) {
@@ -124,7 +125,9 @@ class Pool {
                     }
                 }
             }
-            if (task) task();
+            if (task) {
+                task();
+            pending.fetch_sub(1);}
         }
     }
 public:
@@ -144,6 +147,7 @@ public:
             lock_guard<mutex> lk(lanes[idx].mtx);
             lanes[idx].q.push([t]{ (*t)(); });
         }
+        pending.fetch_add(1);
         lanes[idx].cv.notify_one();
         return fut;
     }
@@ -152,6 +156,9 @@ public:
         for (size_t i = 0; i < sz; ++i) {
             lanes[i].cv.notify_all();
         }
+    }
+    int get_pending() {
+        return pending.load();
     }
     
     ~Pool() {
@@ -175,6 +182,14 @@ struct BatchStats {
 };
 BatchStats batch_stats;
 atomic<int> debug_hits{0};
+string get_summary(CType t) {
+    switch(t) {
+        case CType::LOG: return "log audit done";
+        case CType::IMG: return "img filter done";
+        case CType::CSV: return "csv analytics done";
+    }
+    return "unknown";
+}
 Result process(const Chunk& c, Metrics& m,int core_id) {
     debug_hits.fetch_add(1, memory_order_relaxed);
     raw_s.hits[core_id % 4].fetch_add(1, memory_order_relaxed);
@@ -189,10 +204,8 @@ Result process(const Chunk& c, Metrics& m,int core_id) {
     m.bytes.fetch_add(c.data.size(), memory_order_relaxed);
     m.done.fetch_add(1, memory_order_relaxed);
     
-    string sum;
-    if (c.type == CType::LOG) sum = "log audit done";
-    else if (c.type == CType::IMG) sum = "img filter done";
-    else sum = "csv analytics done";
+    string sum = get_summary(c.type);
+    return {c.id, c.type, c.data.size(), h, sum};
     
     return {c.id, c.type, c.data.size(), h, sum};
 }
@@ -246,7 +259,7 @@ int main() {
     }
     this_thread::sleep_for(chrono::milliseconds(100));
     pool.cancel();
-    
+    cout << "pending tasks: " << pool.get_pending() << "\n";
     auto audit = async(launch::deferred, [&]{
     cout << "computing deep audit...\n";
     uint64_t sum = 0;
