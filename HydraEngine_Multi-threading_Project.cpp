@@ -165,6 +165,10 @@ public:
         }
     }
 };
+struct RawStats {
+    atomic<int> hits[4];
+};
+RawStats raw_s;
 atomic<int> debug_hits{0};
 Result process(const Chunk& c, Metrics& m,int core_id) {
     debug_hits.fetch_add(1, memory_order_relaxed);
@@ -190,10 +194,6 @@ void transfer(Bucket& src, Bucket& dst, Result& r) {
     scoped_lock lk(src.mtx, dst.mtx);
     dst.items.push_back(r);
 }
-struct RawStats {
-    atomic<int> hits[4];
-};
-RawStats raw_s;
 int main() {
     cout << "starting hydra engine...\n";
     const size_t cores = 4;
